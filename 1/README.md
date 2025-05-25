@@ -119,6 +119,8 @@ partitioner, key, partition 순서, linger.ms, consumer group
 
 궁금한 점은 vm으로 kafka 를 설치하도록 한 점이 궁금함. docker를 통해 파일만 공유하면 모든 수강생들이 손쉽게 설치할 수 있을 것 같았음.
 
+그래서 docker를 이용하여 실습을 따라가보자고 함
+
 ![alt text](image.png)
 
 이를 이용해서 실습을 따라가 볼 예정임.
