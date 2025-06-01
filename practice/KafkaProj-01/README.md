@@ -52,3 +52,26 @@ findUser(id)
 ack을 받아서 보고 처리를 해야함. 이는 callback을 이용하기 때문임.
 
 카프카 내부에서 `acks`가 `0`이면 재전송을 하지 않음. `1`이나 `-1` 이면 함.
+
+
+```kotlin
+
+kafkaProducer.send(producerRecord) { recordMetadata, exception ->
+
+    exception?.let{
+        logger.error("exception error from broker {}", it.message)
+        return@send
+    }
+
+    logger.info("### record metadata received ###")
+    logger.info("partition : {}, offset: {}, timestamp: {}", recordMetadata.partition(), recordMetadata.offset(), recordMetadata.timestamp())
+}
+```
+
+를 이용할 경우, 결과가
+
+> [kafka-producer-network-thread | producer-1] INFO main - ### record metadata received ###
+[kafka-producer-network-thread | producer-1] INFO main - partition : 0, offset: 17, timestamp: 1748786630363
+
+
+처럼 나옴. 즉, 다른 thread에서 callback이 호출됨.
