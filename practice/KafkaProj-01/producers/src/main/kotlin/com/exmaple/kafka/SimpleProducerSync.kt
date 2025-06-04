@@ -1,4 +1,4 @@
-package org.example.com.exmaple.kafka
+package com.exmaple.kafka
 
 import org.apache.kafka.clients.producer.KafkaProducer
 import org.apache.kafka.clients.producer.ProducerConfig
