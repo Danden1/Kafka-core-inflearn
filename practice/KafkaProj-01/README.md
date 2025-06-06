@@ -75,3 +75,49 @@ kafkaProducer.send(producerRecord) { recordMetadata, exception ->
 
 
 처럼 나옴. 즉, 다른 thread에서 callback이 호출됨.
+
+
+### ack 설정
+
+멀티 broker 환경에서, leader에 메시지를 보내고 follower에 데이터를 복사함.
+
+`acks = 0` 이면, ack을 받지 않고 바로 보냄. 데이터 손실이 되도 큰 상관이 없는 경우 사용
+
+`acks = 1` leader에게 데이터를 보내면, leader가 write에 관한 ack 만 봄. 즉, follower에 데이터가 복사되었는 지는 모름. 만약 이 과정에서 leader에 문제가 생기면 데이터 유실이 될 수 있음.(follower의 데이터는 업데이트 되지 않음.)
+
+`acks = -1(all)`(default?) 이면, leader가 `min.insync.replicas` 개수 만큼의 replicator 에 데이터가 복사되면 ack을 받음. 2로 설정되어 있다면, 3대 중 2대가 죽으면 에러 발생함. 즉, 데이터 손실이 발생하지 않지만 전송 속도가 느림.
+
+
+callback 기반의 async에서 acks 설정에 기반하여 retry 수행됨.
+
+sync 방식에서 acks = 0 일 경우, ack을 기다리지 않음.(fire and forget, 거의 이렇게 사용하지 않음.. ack이 중요하지 않기 때문에 그냥 던지고 다른 일을 하면 되는데 sync로 기다릴 필요가 없음.)
+
+
+`acks` 0으로 보내면,
+
+> [main] INFO main - sync message : Q001, partition : 1, offset: -1
+
+처럼 offset 정보를 받지 못함.
+
+
+### 배치 전송
+
+Serialize -> Partitioning -> Compression(선택) -> record accumulator 저장(배치 단위) -> Sender에서 별도의 Thread로 전송
+
+`send()` 를 호출해도 바로 전송되지 않고 내부 메모리에 저장됨.
+
+`buffer.memory` 설정 사이즈 만큼 데이터 보관될 수 있음. 이는 전체 메모리 사이즈임.
+
+`batch.size` 는 해당 partition 의 단일 배치 사이즈를 의미.
+
+`linger.ms` 는 최대 대기 시간임. batch size만큼 차지 않아도 해당 시간이 경과하면 데이터 보냄.
+
+#### Producer의 Sync, callback async
+
+`Callback` 기반의 Async는 여러 개의 메시지가 batch로 만들어짐.
+
+.get() 을 이용하여 sync 방식을 이용하면, 메시지 베치 처리가 불가능함. 전송 자체는 배치 레벨로 되지만, 배치에 메시지는 1개만 있음.
+(응답을 받기 위해 block이 됨)
+
+
+

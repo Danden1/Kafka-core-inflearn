@@ -90,9 +90,12 @@ fun main() {
 
     //single broker
 //    props.setProperty("bootstrap.servers", "localhost:9092");
-    props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
-    props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name);
-    props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name);
+    props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092")
+    props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name)
+    props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name)
+//    props.setProperty(ProducerConfig.ACKS_CONFIG, "0")
+    props.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, "32000")
+    props.setProperty(ProducerConfig.LINGER_MS_CONFIG, "20")
 
     val kafkaProducer: KafkaProducer<String, String> = KafkaProducer<String, String>(props)
 
