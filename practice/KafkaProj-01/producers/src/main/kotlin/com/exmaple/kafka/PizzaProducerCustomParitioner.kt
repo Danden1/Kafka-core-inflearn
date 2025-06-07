@@ -9,6 +9,8 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.*
 
+
+
 fun main() {
 
     val logger: Logger = LoggerFactory.getLogger("main")
@@ -84,7 +86,7 @@ fun main() {
 
 
 
-    val topic = "pizza-topic"
+    val topic = "pizza-topic-partitioner"
 
     // Map을 써도 됨.
     val props = Properties();
@@ -96,13 +98,15 @@ fun main() {
     props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092")
     props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name)
     props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer::class.java.name)
-//    props.setProperty(ProducerConfig.ACKS_CONFIG, "0")
-    props.setProperty(ProducerConfig.BATCH_SIZE_CONFIG, "32000")
-    props.setProperty(ProducerConfig.LINGER_MS_CONFIG, "20")
+//    props.setProperty(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, "6")
+    props.setProperty(ProducerConfig.PARTITIONER_CLASS_CONFIG, CustomPartitioner::class.java.name)
+    //custom partitioner 에서 사용!
+    //P001 은 대기업 피자 가게라고 가정. 이 피자 가게는 총 파티션들 중 절반을 이용함. 나머지 피자 가게들은 남는 파티션 이용!
+    props.setProperty("custom.specialKey", "P001")
 
     val kafkaProducer: KafkaProducer<String, String> = KafkaProducer<String, String>(props)
 
-    sendPizzaMessages(kafkaProducer, topic, -1, 10, 100, 100, false)
+    sendPizzaMessages(kafkaProducer, topic, -1, 100, 0, 0, true)
 
     kafkaProducer.close()
 }
