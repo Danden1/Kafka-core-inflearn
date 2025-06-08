@@ -202,3 +202,101 @@ default로 key값이 없다면 파티셔너 전략에 따름(앞 부분 참고)
 
 만약 key가 있다면, murmur2 알고리즘으로 해시 값을 구한 후 partition 개수로 나눈 나머지 값을 partition 으로 사용함.
 
+
+## Consumer
+
+`consumer`는 `poll()` 메소드를 이용하여 주기적으로 브로커의 토픽 파티션에서 데이터를 가져옴.
+
+성공적으로 가져왔으면, `commit`을 통해 __consumer_offsets 을 갱신함.
+
+heart beat thread를 통해 Group Coordinator에 보고하는 역할을 함.
+
+만약 heart beat를 받지 못하면, rebalance 수행.
+
+producer에서 `serilializer`를 통해 직렬화된 데이터를 가져오고, `deserializer`를 통해 역직렬화하여 사용함.
+
+`group.id` 를 설졍해야 함.
+
+cosumer는 `close()` 하는 것이 매우 중요함!
+
+안하면,
+
+> [main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_01-1, groupId=group_01] (Re-)joining group
+> [main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_01-1, groupId=group_01] Request joining group due to: need to re-join with the given member-id: consumer-group_01-1-d450100c-dc89-4263-8a74-18cad1f1b702
+> [main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_01-1, groupId=group_01] (Re-)joining group
+
+같은 메시지가 뜨면서 연결하는 데 매우 오래 걸림.
+
+그 이유는 group coordinator 가 해당 consumer 가 살아있다고 판단해서?
+
+### poll
+
+Consumer 안에는
+
+Fetcher, ConsumerNetworkClient, SubscriptionState, ConsumerCoordinator, HeartbeatThread 등이 있음.
+
+- 브로커나 Consumer 내부 큐에 데이터가 있다면, 바로 데이터를 반환.
+- 그렇지 않은 경우에는 Duration 동안 데이터 Fetch를 브로커에 계속 수행
+
+첫 번째 poll() 때, meta data 을 가져오는 등 다양한 작업을 한다고 함.
+
+```kotlin
+
+kafkaConsumer.poll(Duration.ofMillis(1000)).forEach { record ->
+    logger.info("### record received ###")
+    logger.info("key : {}, value : {}, partition : {}, offset: {}", record.key(), record.value(), record.partition(), record.offset())
+    // RDB, NoSQL 등 데이터 작업
+}
+```
+
+`Fetcher`는 데이터를  LinkedQueue 에서 가져오고, poll() 이 완료됨.
+
+`ConsumerNetworkClient` 가 비동기로 kafka에서 데이터를 가져온 후, Linked Queue 에 넣어줌.
+
+Linked Queue 에 데이터가 없을 경우 duration 동안 broker에 미세지 요청 후, poll 수행 완료.
+
+만약 데이터가 중간에 들어오면, duration 동안 기다리지 않고 바로 데이터를 가져오고 queue 에 저장함.
+
+
+#### Fetcher
+
+설정
+
+- `fetch.min.bytes` (default : 1) : recorde를 읽어들이는 최소 byte. 이상의 새로운 메시지가 쌓일때 까지 kafka로부터 데이터를 가져오지 않음.(ConsumerNetworkClient 설정)
+- `fetch.max.wait.ms`(default : 500) : fetcher가 데이터를 가져오기 위해 기다리는 최대 시간. 이 시간이 지나면, 최소 바이트보다 적더라도 데이터를 가져옴.
+- `fetch.max.bytes`(default : 52_428_800) : fetcher가 가져올 수 있는 최대 바이트.
+- `max.partition.fetch.bytes`(default : 1_000_000) : fetcher가 가져올 수 있는 최대 파티션당 바이트.
+- `max.poll.records`(default : 500) : poll() 메소드가 가져올 수 있는 최대 레코드 수. 실제 fetcher 가 가져오는 데이터 개수
+
+<br>
+
+poll 실행 시, 일어나는 일
+
+1. 가져올 데이터가 1 건도 없으면 poll()의 duration 만큼 대기 후 return
+2. 가져와야할 데이터가 많다면, `max.partition.fetch.bytes` 배치 크기 설정. 그렇지 않은 경우, `fetch.min.bytes`로 배치 크기 설정? -> 강사 분 뇌피셜이라고 함. ??
+3. 가장 최신의 offset 데이털르 가조오고 있다면, `fetch.min.bytes` 만큼 가져와서 return 함. `fetch.min.bytes` 만큼 쌓이지 않았다면 `fetch.max.wait.ms` 만큼 기다린 후, 데이터를 가져옴.
+4. 오랜 과거 offset 데이터를 가져온다면, `max.partition.fetch.bytes` 만큼 파티션에서 데이터를 읽은 뒤 반환.
+5. `max.partition.fetch.bytes` 에 도달하지 못하여도 가장 최신의 offset에 도달하면 반환
+6. 토픽에 파티션이 많아도 가져오는 데이터량은 `fetch.max.bytes` 로 제한됨.
+7. Fetcher가 LinkedQueue에서 가져오는 데이터 개수는 `max.poll.records` 로 제한됨.
+
+
+
+### subscribe, poll, commit 로직
+
+subscribe() 를 통해 topic 구독함.
+
+poll() 메소드를 이용하여 메시지를 주기적으로 읽어올 수 있음.
+
+메시지를 성공적으로 가져왔으면 commit을 통해 __consumer_offsets(broker 내부에 있음) 을 갱신함
+
+
+### offset
+
+consumer가 topic에 `처음` 접속하여 message를 가져올 때, 어디서부터 가져올 것인지 설정 가능.
+
+- `auto.offset.reset` : consumer가 처음 topic에 접속했을 때, 어디서부터 가져올 것인지 설정함. `earliest`(default) 는 가장 오래된 메시지부터 가져오고, `latest` 는 가장 최신 메시지부터 가져옴.
+
+`__consumer_offsets` 은 consumer group 별로 관리가 됨.
+
+- `offset.retention.minutes` : 해당 consumer group의 offset을 얼마나 유지할 것인지 설정함. default 7일

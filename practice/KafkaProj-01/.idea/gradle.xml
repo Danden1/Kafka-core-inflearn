@@ -10,6 +10,7 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/Consumers" />
             <option value="$PROJECT_DIR$/producers" />
           </set>
         </option>
