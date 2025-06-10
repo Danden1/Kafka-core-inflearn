@@ -102,7 +102,7 @@ fun main() {
 
     val kafkaProducer: KafkaProducer<String, String> = KafkaProducer<String, String>(props)
 
-    sendPizzaMessages(kafkaProducer, topic, -1, 10, 100, 100, false)
+    sendPizzaMessages(kafkaProducer, topic, -1, 1000, 0, 0, true)
 
     kafkaProducer.close()
 }

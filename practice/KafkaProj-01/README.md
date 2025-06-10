@@ -300,3 +300,148 @@ consumer가 topic에 `처음` 접속하여 message를 가져올 때, 어디서�
 `__consumer_offsets` 은 consumer group 별로 관리가 됨.
 
 - `offset.retention.minutes` : 해당 consumer group의 offset을 얼마나 유지할 것인지 설정함. default 7일
+
+
+### rebalancing
+
+consumer group에 새로운 consumer가 추가되거나, 기존 consumer가 제거될 때 발생함.
+
+broker의 group coordinator 가 진행하게 됨.
+
+1. consumer group 내의 consumer가 broker에 최초 접속 요청 시, group coordinator 가 새성됨.
+2. 동일 group.id로 여러 개의 consumer로 broker의 group coordinator 에 접속
+3. 가장 빨리 요청한 consumer가 leader consumer(group 내의)로 지정됨.
+4. consumer leader 는 파티션 할당 전략에 따라 consumer 들에게 파티션 정보를 할당함.(leader 가 죽은 지 감지하려면?)
+5. leader consumer 는 최종 할당된 파티션 정보를 group coordinator 에 전달함.
+6. consumer 들이 정보 읽음
+
+consumer 가 죽었는 지 판단하기 위해 heart beat를 주기적으로 보냄. -> 죽으면, group coordinator 가 리밸런싱하라고 전달함.
+
+`GroupMetaData`로 그룹 정보를 관리함
+
+consumer 가 없으면 `empty` 상태. consumer 추가 되면, 리밸런싱 진행후 `stable` 상태로 변경.
+만약 다시 없어지면 `empty` 상태로 변경됨.
+
+
+### static group membership
+
+consumer 들이 많아지고, 리밸런싱이 일어나면 많은 일이 일어날 수 있음.
+
+consumer restart도 리밸런싱이 발생함 -> 이 경우 불필요한 리밸런싱이 일어나게 됨.
+
+-> 이를 방지하기 위해 수행.
+
+consumer 들에게 고정된 id를 부여.
+
+consumer 가 다운 되어도, `seesion.timeout.ms` 내 에 재기동 되면, rebalancing 발생하지 않음.
+
+
+### heart beat thread
+
+heart beat thread 를 통해 브로커의 group coordinator 에 주기적으로 heart beat(consumer 상태 확인)를 보냄.
+
+consumer parameter(broker 파라미터 아님)
+
+- `heartbeat.interval.ms` (default : 3_000) : 만큼 주기적으로 heart beat 를 보냄. `session.timeout.ms` 보다 작아야 함. `session.timeout.ms` 보다 1/3 보다 낮게 설정 권장
+- `session.timeout.ms` (default : 45_000) : 브로커가 heart beat를 기다리는 최대 시간. 이 시간이 지나면, 리밸런싱이 발생함.
+- `max.poll.interval.ms` (default : 30_000) : poll() 메소드가 호출되지 않는 최대 시간. 이 시간이 지나면, 리밸런싱이 발생함. 즉, poll() 메소드를 호출하지 않으면, 리밸런싱이 발생함. 예를 들면, poll 하고 다른 작업(rdbms 등)에 넣는 시간이 오래 걸리면, 리밸런싱이 일어날 수 있음!!!!
+
+`max.poll.interval.ms`를 잘 설정해야 함!
+
+해당 시간 안에 모든 작업 처리할 수 있도록 옵션 조절 필요! 설정하지 않으면 의도치 않은 리밸런싱이 일어나게 됨.
+
+```
+[kafka-coordinator-heartbeat-thread | group_02] WARN org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_02-1, groupId=group_02] consumer poll timeout has expired. This means the time between subsequent calls to poll() was longer than the configured max.poll.interval.ms, which typically implies that the poll loop is spending too much time processing messages. You can address this either by increasing max.poll.interval.ms or by reducing the maximum size of batches returned in poll() with max.poll.records.
+[kafka-coordinator-heartbeat-thread | group_02] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_02-1, groupId=group_02] Member consumer-group_02-1-c9d0c55a-a5ac-41c9-b31a-e76547004cb4 sending LeaveGroup request to coordinator localhost:9092 (id: 2147483646 rack: null) due to consumer poll timeout has expired.
+[kafka-coordinator-heartbeat-thread | group_02] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_02-1, groupId=group_02] Resetting generation and member id due to: consumer pro-actively leaving the group
+[kafka-coordinator-heartbeat-thread | group_02] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group_02-1, groupId=group_02] Request joining group due to: consumer pro-actively leaving the group
+```
+위와 같은 메시지를 마주치게 되고, 다음 poll() 호출할 때는 다시 meta 정보 부터 가져옴(consumer의 첫 poll 요청은 실제 record를 가져오지 않음. meta 정보 가져옴)
+
+
+### rebalance mode
+
+#### Eager
+
+기본으로 사용하고 있는 모드.
+
+rebalacing이 발생하면, 기존 consumer 들의 모든 파티션 할당 취소하고 잠시 메시지 읽지 않음.
+
+파티션 할당 전략(range, round robing, sticky)에 따라 partition 할당 후 메시지 읽음.
+
+partition 이 많아지면, 대용량 메시지 처리를 하지 못하게 됨.
+
+
+#### (Incremental) Cooperative
+
+Eager랑 다르게 모든 파티션 할당 취소하지 않음.
+
+대상이 되는 consumer들에 대해서 파티션에 따라 rebalancing이 점진적으로 일어남.
+
+### partition 할당 전략
+
+- Consumer 의 부하를 파티션 별로 균등하게 할당해야 함.
+
+- 리밸런싱 및 데이터 처리 효율성 극대화 가능
+
+<br>
+
+**할당 전략**
+
+- Range : 서로 다른 2개 이상의 토픽을 구독할 시, **토픽 별로 동일한 파티션**을 특정한 consumer 에 할당. -> key를 동일한 키 처리 가능(e.g order id 등). 하지만 특정 consumer에 부하가 몰릴 수 있음.
+- Round robin : partition 을 순차적으로 consumer 에 할당. rebalance 일어나면, 모든 consumer에 대해 round robin 으로 다시 파티션 할당해주어야 함! 즉. consumer가 읽던 partition 정보가 크게 바뀌게 됨.(사라질 수 있음)
+- sticky : 최초 할당된 파티션과 consumer 매핑을 rebalance 수행되어도 가급적으로 그대로 유지할 수 있도록 지원(eager). sticky 는 RR과 달리 기존에 consumer가 구독하고 있던 파티션은 계속 읽음. 
+- Cooperative sticky : rabalance 시 모든 consumer의 파티션 매핑이 해제되지 않고 rebalance 연관된 파티션과 consumer 만 재매핑됨(eager이 일어나지 않음)
+
+<br>
+
+기본인 Range 기반으로 하고 consumer 2개, topic 2개, partition 각 3개로 설정 하면,
+
+아래처럼 같은 파티션에 대해서 읽고 있음.
+```
+partitions=[topic-p3-t2-0, topic-p3-t2-1, topic-p3-t1-0, topic-p3-t1-1])
+Notifying assignor about the new Assignment(partitions=[topic-p3-t2-2, topic-p3-t1-2])
+```
+
+partition 의 개수보다 많은 4대로 하면, consumer 하나는 아무 토픽도 구독하고 있지 않음! -> 이 부분은 강의에 없음.
+
+```
+Notifying assignor about the new Assignment(partitions=[])
+```
+
+반면에 Round robin 으로 consumer 4대를 기동시키면, 각 consumer에 partition 개수 2/2/1/1 로 할당됨
+
+
+
+Cooperative sticky로 하면, 앞의 3개와 달리
+
+```
+[main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group-mtopic-1, groupId=group-mtopic] Updating assignment with
+	Assigned partitions:                       [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t1-2, topic-p3-t2-0, topic-p3-t2-1, topic-p3-t2-2]
+	Current owned partitions:                  []
+	Added partitions (assigned - owned):       [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t1-2, topic-p3-t2-0, topic-p3-t2-1, topic-p3-t2-2]
+	Revoked partitions (owned - assigned):     []
+```
+처럼 보이게 됨!
+
+consumer 가 1개 더 추가 되면, 기존 consumer의 로그에서
+
+```
+[main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group-mtopic-1, groupId=group-mtopic] Updating assignment with
+	Assigned partitions:                       [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t2-0]
+	Current owned partitions:                  [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t1-2, topic-p3-t2-0, topic-p3-t2-1, topic-p3-t2-2]
+	Added partitions (assigned - owned):       []
+	Revoked partitions (owned - assigned):     [topic-p3-t1-2, topic-p3-t2-1, topic-p3-t2-2] //포기하는 partition
+```
+
+가 나온 후에, 
+
+```
+[main] INFO org.apache.kafka.clients.consumer.internals.ConsumerCoordinator - [Consumer clientId=consumer-group-mtopic-1, groupId=group-mtopic] Updating assignment with
+	Assigned partitions:                       [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t2-0]
+	Current owned partitions:                  [topic-p3-t1-0, topic-p3-t1-1, topic-p3-t2-0]
+	Added partitions (assigned - owned):       []
+	Revoked partitions (owned - assigned):     []
+```
+
+로 보이게 됨. 즉, 모든 consumer 가 중지되지 않음!

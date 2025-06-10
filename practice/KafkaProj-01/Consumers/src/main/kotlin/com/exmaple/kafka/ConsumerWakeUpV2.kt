@@ -12,13 +12,13 @@ import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.Properties
 
-class ConsumerWakeUp {
+class ConsumerWakeUpV2 {
 
 
 
     companion object {
 
-        private val logger : Logger = LoggerFactory.getLogger(ConsumerWakeUp::class.java)
+        private val logger : Logger = LoggerFactory.getLogger(ConsumerWakeUpV2::class.java)
         @JvmStatic
         fun main(args: Array<String>) {
 
@@ -28,9 +28,9 @@ class ConsumerWakeUp {
             props.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092")
             props.setProperty(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer::class.java.name)
             props.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer::class.java.name)
-            props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "group_01_static")
-            //consumer id 지정. consumer 마다 다르게 해야 함!
-            props.setProperty(ConsumerConfig.GROUP_INSTANCE_ID_CONFIG, "1")
+            props.setProperty(ConsumerConfig.GROUP_ID_CONFIG, "group_02")
+            props.setProperty(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "60000") // 1 minutes
+
 
             val kafkaConsumer : KafkaConsumer<String, String> = KafkaConsumer<String, String>(props)
             kafkaConsumer.subscribe(listOf(topic))
@@ -48,10 +48,13 @@ class ConsumerWakeUp {
 
             )
 
+            var cnt : Int = 0
+
             try {
                 while (true) {
                     val records: ConsumerRecords<String, String> = kafkaConsumer.poll(Duration.ofMillis(1000))
 
+                    logger.info("loop cnt : {}, record count : {}", cnt++, records.count())
                     for (record: ConsumerRecord<String, String> in records) {
                         logger.info(
                             "record key: {}, value: {}, partition: {}, offset: {}, timestamp: {}",
@@ -62,6 +65,9 @@ class ConsumerWakeUp {
                             record.timestamp()
                         )
                     }
+
+                    logger.info("main thread is sleeping {} ms during while loop.", cnt * 10_000)
+                    Thread.sleep(10_000 * cnt.toLong()) // Simulate some processing time
                 }
             } catch (e: WakeupException) {
                 logger.error("WakeupException caught: {}", e.message)
