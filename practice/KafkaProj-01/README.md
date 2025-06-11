@@ -445,3 +445,38 @@ consumer 가 1개 더 추가 되면, 기존 consumer의 로그에서
 ```
 
 로 보이게 됨. 즉, 모든 consumer 가 중지되지 않음!
+
+### commit
+
+읽은 후에 broker의 __consumer_offsets 을 업데이트 해야 함.
+
+어느 consumer 가 commit을 했는지 몰라도 됨. group 별로 관리하기 때문에.
+
+`poll()` 한 후에, 바로 `commit` 을 하지는 않음.
+
+`poll()` 해서 데이터를 읽다가 `commit` 전에 consumer 가 죽으면, 중복 데이터를 처리하게 됨!.
+
+'poll()' 후에 바로 commit 하도록 하면, 데이터가 유실될 수 있음.(auto)
+
+
+- auto commit : 'auto.enable.commit=true'인 경우 읽어온 메시지를 브로커에 바로 commit 적용하지 않음. `auto.commit.interval.ms` 에 정해진 주기(기본 5s) 마다 consumer 가 자동(poll 할 때)으로 commit. consumer의 장애/재기동 및 리밸런싱 후, 중복 처리 발생할 수 있음!(낮은 확률)
+- sync : `commitSync()` 메소드를 사용. poll() 한 후, 메시지의 마지막 offsetㅇ르 브로커에 커밋. 성공할 때까지 블로킹. 실패시 다시 commit 요청. 느린 방식.
+- Async: `commitAsync()` 메소드를 사용. poll() 과 동시에 이전 메시지의 마지막 offset을 브로커에 커밋. 성공 여부를 확인하지 않고 실패해도 다시 commit 안함. 빠른 방식.
+
+
+### topic의 특정 파티션만 할당하기
+
+여러 개의 파티션이 있는 topic 에서 특정 파티션만 구독하도록 할 수 있음.
+
+`assign()` 메소드에 `TopicPartition(topic과 partition 정보가 있음)` 객체로 특정 파티션을 인자로 입력하여 할당.
+
+-> 이를 사용할 일이 있는지? -> 장애 등이 발생하여 특정 offset 으로부터 읽을 필요가 있을 때 이용할 수 있음.
+
+`seek(topicPartition, offset)` 메소드를 이용하여 특정 파티션의 특정 offset부터 읽을 수 있음.
+
+단, 동일 group id 에서 commit을 수행하면, __consumer_offsets이 갱신되므로 주의 필요!
+
+
+
+
+
