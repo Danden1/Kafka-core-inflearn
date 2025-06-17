@@ -477,6 +477,86 @@ consumer 가 1개 더 추가 되면, 기존 consumer의 로그에서
 단, 동일 group id 에서 commit을 수행하면, __consumer_offsets이 갱신되므로 주의 필요!
 
 
+## 멀티 노드
+
+### replication
+
+- 개별 노드의 장애를 대비하여 높은 가용성 제공
+- replication 은 토픽 생성 시 replication factor 설정값을 통해 구성
+- 3이면, 원본 파티션 / 복제 파티션 모두 포함하여 3개의 파티션을 가짐. -> 3 * n(파티션 개수)
+- replication factor는 broker의 개수보다 클 수 없음.
+- 1개의 leader 파티션과 N 개의 follower 로 구성됨.
+
+<br>
+
+- Producer / Consumer 모두 leader 파티션을 이용해 쓰고 읽음.
+- 파티션의 replication은 leader 에서 follwer로만 이뤄짐.
+- 파티션 리더를 관리하는 브로커는 파티션 팔로우를 관ㄹ히나는 브로커의 replication 도 관리(ISR)
+
+
+<br>
+
+### zookeeper
+
+znode를 이용하여 관리.
+
+- 클러스터 내 개별 노드의 중요한 정보를 관리하고 리더 노드를 산출함.
+- controller broker 선출(election, 선착순)
+  - 파티션 leader를 뽑음
+- 클래스터 내 broker 의 멤버쉼 관리.
+  - 클러스터의 broker 들의 list, broker join/ leave 관리 및 통보
+- `zookeeper.set.connection.timeout.ms` 이내에 heart beat를 받지 못하면 해당 브로커의 노드 정보 삭제.
+
+
+#### election
+
+1. 특정 broker에서 heart beat이 오지 않으면 브로커 노드 정보 갱신
+2. controller는 zookeeper를 모니터링 하던 중, watch event 로 해당 broker의 다운 정보를 받음.
+3. controller는 다운된 broker의 파티션들에 대해 새로운 leader / follower 결정
+4. 결정된 새로운 leader / follower 정보를 zookepper에 젖아하고 해당 파티션을 복제하는 모든 브로케들에게 새로운 leader / follower 정보를 전달하고 새로운 leader 로부터 복제 수행 요청
+5. controller는 모든 브로커가 가지는 MetaDatacahce를 새로운 Leader / Follower 정보로 갱신할 것을 요청
+
+
+
+### ISR(In-Sync Replica)
+
+Follower 들은 누구나 leader가 될 수 있음. 단, ISR 내에 있는 Follower 들만 가능!
+
+지속적으로 모니터링을 수행하여 ISR을 관리
+
+Follower 가 leader 의 메시지를 빠르게 복제하지 못할 경우, 해당 follower는 ISR에서 제외됨.
+
+
+- `replica.lag.time.max.ms` (default : 10_000) : 해당 시간 내에 leader 의 메시지를 지속적으로 가져가야 함!
+
+Follower 가 leader 에게 fetch 요청 수행. 요청에는 다음에 읽을 메시지의 offset 정보 있음.
+
+leader 는 이 offset 을 보고 현재 leader partition의 가장 최신 offset과 비교하여 잘 가져가고 있는지 판단.
+
+
+- `min.insync.replicas` : produer 가 acks =all 로 성공적으로 메시지를 보낼 수 있는 최소한의 ISR 브로커 개수. 2이면, leader + follower 1대에 데이터가 쓰여지면 됨. 만약 조건을 만족 못하면, error를 producer에 응답으로 보냄.
+
+
+#### Prefered Leader
+
+leader 가 다운 후, ISR을 통해 follower가 새로운 leader가 되었음.
+
+만약 기존 leader가 다시 살아나면, 기존 파티션들과의 데이터 차이가 생김 -> OSR(out sync replica) 발생.
+
+그래서 기존 leader 가 복구되면, 이를 다시 leader로 설정할 수 있음.(ISR에 포함되어 있다면..?)
+
+
+
+#### Unclean Leader Election
+
+기존의 leader 브로커가 오랜 기간 살아나지 않으면, out of sync follower broker가 leader가 될 지 결정해야 함!
+
+-> 메시지 손실 발생할 수 있음!
+
+
+
+
+
 
 
 
