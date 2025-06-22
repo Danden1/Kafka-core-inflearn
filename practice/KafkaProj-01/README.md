@@ -554,9 +554,58 @@ leader 가 다운 후, ISR을 통해 follower가 새로운 leader가 되었음.
 -> 메시지 손실 발생할 수 있음!
 
 
+## Segment
+
+kafka의 로그 메시지는 실제로 segment 에 저장이 됨.
+
+파티션은 여러 개의 segment로 구성됨. 용량이 차거나 일정 시간이 경과하면 close 되고 새로운 segment 생성.
+
+segment는 close 되면 더 이상 브로커가 write 하지 않고 read-only 가 됨. 단 하나의 active segment 에만 write와 read 수행. 하나의 파티션은 단 하나의 active segment 만 존재함.
+
+
+- `log.segment.bytes` (default : 1GB) : segment의 최대 크기. 이 크기를 초과하면, 새로운 segment 생성됨. topic config는 segment.bytes 임.
+- `log.roll.hours(ms)` (default : 7일) : 개별 segment 가 유지되는 최대 시간. 지정된 시간을 넘기면 해당 segment는 close가 됨.
+
+
+### index
+
+`.log` 파일에는 offset과 message 정보가 있음.
+
+`.index` 파일을 이용해서 해당 offset에 어느 byte poistion에 있는지 정보를 저장함(빠르게 읽기 위해서)
+
+- `log.index.interfval.bytes` (default : 4096) : segment bytes 가 만들어질때마다 해당 offset에 대한 byte position 을 기록함.
+
+'.timeindex'  파일은 메시지의 생성 unix 시간을 밀리 세컨드 단위로 가지고 있고, 해당 생성 시간에 해당하는 offset 정보를 가짐.
+
+
+### segment 파일의 생명 주기
+
+segment 파일은 active -> close -> delete (또는 compacted)의 생명 주기를 가짐.
+
+segment 파일은 log cleanup 정책에 따라 지정된 특정 시간이나 파일 크기에 따라 삭제 되거나 compact 형태로 저장됨.
+
+- `log.cleanup.policy` (default : delete) 로 설정 가능. topic 레벨은 `cleanup.policy` 임. delete로 설정하면, `log.retention.hours` / `log.retention.bytes` 에 따라 삭제됨. compact로 설정하면, segment 를 key 값 레벨로 가장 최신의 메시지만 유지하도록 segment 재구성. 둘다 설정도 가능!
+- `log.retention.hours` (default : 168) : segment 파일이 유지되는 최대 시간.
+- `log.retention.bytes` (default : -1) : segment 파일이 유지되는 최대 크기. -1이면, 무제한으로 유지됨.
+- `log.retention.check.interval.ms` : segment 파일의 삭제 여부를 확인하는 주기.
 
 
 
+### compaction
 
+segment 파일을 key 값 레벨로 가장 최신의 메시지만 유지하도록 segment 재구성함.
+
+만약 k1 키를 가지는 v1, v2, v3 메시지가 있다면, v3(가장 최신) 만 남기고 나머지는 삭제함.
+
+key 값이 null 이면 적용 불가능!
+
+백그라운드 스레드 방식으로 별도의 i/o 작업을 수행함.
+
+`log cleaner` 를 이용하여 수행하게 됨.(`log.cleaner.enabled=true`) 
+
+- clean 영역 : log compaction이 적용됨.
+- dirty 영역 : 아직 적용되지 않음.
+
+자세한 내용은 문서 참고하는 것이 좋아보임.
 
 
